@@ -9,4 +9,3 @@ private fun readStrings() = readLn().split(" ")
 private fun readInts() = readStrings().map { it.toInt() }
 private fun readLongs() = readStrings().map { it.toLong() }
 private fun readDoubles() = readStrings().map { it.toDouble() }
-
