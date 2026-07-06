@@ -1,5 +1,6 @@
 CompileFlags:
+  Compiler: /opt/homebrew/bin/g++-16
   Add: [
-    "-std=c++20",
+    "-std=c++26",
     "-I."
   ]
