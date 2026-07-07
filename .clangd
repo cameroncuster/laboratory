@@ -1,10 +1,11 @@
+# clangd resolves libstdc++ include paths dynamically from g++-16 via the
+# --query-driver flag set in nvim's clangd config, so no paths are hardcoded.
+# -fsized-deallocation is required for libstdc++ to expose std::generator
+# (apple clang disables it by default; gcc enables it).
 CompileFlags:
   Compiler: /opt/homebrew/bin/g++-16
   Add: [
     "-std=c++26",
     "-I.",
-    "-fsized-deallocation",
-    "-nostdinc++",
-    "-isystem/opt/homebrew/Cellar/gcc/16.1.0/include/c++/16",
-    "-isystem/opt/homebrew/Cellar/gcc/16.1.0/include/c++/16/aarch64-apple-darwin25"
+    "-fsized-deallocation"
   ]
