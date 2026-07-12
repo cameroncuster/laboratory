@@ -1,0 +1,4 @@
+*.out
+*.out.dSYM/
+*.class
+META-INF/
