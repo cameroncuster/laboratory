@@ -21,9 +21,9 @@ rm -rf bits/stdc++.h.gch
 mkdir bits/stdc++.h.gch
 
 # NOTE: keep these in sync with M.cpp_flags in ~/cfg/.config/nvim/lua/cp.lua
-f4_flags="-I. -I$pch_dir -std=c++26 -Wall -O2"
-f5_flags="-I. -I$pch_dir -std=c++26 -Wall"
-f6_flags="-std=c++26 -I. -I$pch_dir -g -gdwarf-4 -fno-omit-frame-pointer
+f4_flags="-I. -I$pch_dir -DLOCAL -std=c++26 -Wall -O2"
+f5_flags="-I. -I$pch_dir -DLOCAL -std=c++26 -Wall"
+f6_flags="-std=c++26 -I. -I$pch_dir -DLOCAL -g -gdwarf-4 -fno-omit-frame-pointer
   -Wall -Wextra -Wshadow -Wpedantic -Wformat=2 -Wlogical-op -Wfloat-equal
   -Wcast-qual -Wcast-align -Wshift-overflow=2 -Wduplicated-cond
   -Wnull-dereference -fsanitize=address,undefined -fno-sanitize-recover=all

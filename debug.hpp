@@ -77,7 +77,11 @@ void debug_out(Head H, Tail... T) {
 }
 
 #ifdef LOCAL
-#define debug(...) cerr << "[" << #__VA_ARGS__ << "]:", debug_out(__VA_ARGS__)
+// flush cout first: with sync_with_stdio(0) cout is buffered until exit while
+// cerr is unbuffered, so without this every debug line prints before any real
+// output instead of interleaving in program order
+#define debug(...) \
+  cout.flush(), cerr << "[" << #__VA_ARGS__ << "]:", debug_out(__VA_ARGS__)
 #else
 #define debug(...) 42
 #endif
