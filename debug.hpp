@@ -68,7 +68,17 @@ string to_string(tuple<A, B, C, D> p) {
          to_string(get<2>(p)) + ", " + to_string(get<3>(p)) + ")";
 }
 
-void debug_out() { cerr << endl; }
+#include <unistd.h>  // isatty (not part of bits/stdc++.h)
+
+// color debug lines red when stderr is a terminal (matches nvim's old :!
+// behavior of painting stderr with ErrorMsg); plain when piped/redirected
+// so files never get escape-code garbage
+inline const char* debug_color(bool open) {
+  static const bool tty = isatty(fileno(stderr));
+  return tty ? (open ? "\033[31m" : "\033[0m") : "";
+}
+
+void debug_out() { cerr << debug_color(false) << endl; }
 
 template <typename Head, typename... Tail>
 void debug_out(Head H, Tail... T) {
@@ -80,8 +90,10 @@ void debug_out(Head H, Tail... T) {
 // flush cout first: with sync_with_stdio(0) cout is buffered until exit while
 // cerr is unbuffered, so without this every debug line prints before any real
 // output instead of interleaving in program order
-#define debug(...) \
-  cout.flush(), cerr << "[" << #__VA_ARGS__ << "]:", debug_out(__VA_ARGS__)
+#define debug(...)                                                \
+  cout.flush(), cerr << debug_color(true) << "[" << #__VA_ARGS__ \
+                     << "]:",                                     \
+      debug_out(__VA_ARGS__)
 #else
 #define debug(...) 42
 #endif
