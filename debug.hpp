@@ -1,4 +1,7 @@
 #pragma once
+// IWYU pragma: always_keep
+// clangd's include-cleaner would otherwise flag `#include "debug.hpp"` as an
+// unused include in any file that doesn't happen to call dbg() this session
 
 // dbg(...) pretty-prints its arguments to stderr, tagged with the source text.
 // Active only under -DLOCAL; otherwise it expands to 42, so the same file still
