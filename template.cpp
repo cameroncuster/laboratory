@@ -4,7 +4,7 @@ using namespace std;
 #ifdef LOCAL
 #include "debug.hpp"
 #else
-#define debug(...) 42
+#define dbg(...) 42
 #endif
 
 int main() {
