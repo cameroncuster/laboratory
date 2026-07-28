@@ -3,12 +3,13 @@
 // clangd's include-cleaner would otherwise flag `#include "debug.hpp"` as an
 // unused include in any file that doesn't happen to call dbg() this session
 
-// dbg(...) pretty-prints its arguments to stderr, tagged with the source text.
-// Each line is prefixed with three color-coded, width-aligned columns so it's
-// easy to scan: `+<delta>ms` (gray, time since the previous dbg call), `L<line>`
-// (cyan), and `[expr]` (red). Colors are emitted only when stderr is a tty.
-// Active only under -DLOCAL; otherwise it expands to 42, so the same file still
-// builds on judges that don't ship this header.
+// dbg(...) pretty-prints its arguments to stderr as `name = value` pairs so
+// it's obvious which value is which. Each line starts with two color-coded,
+// width-aligned columns: `+<delta>ms` (gray, time since the previous dbg call)
+// and `L<line>` (cyan); each argument's name is red, its value default-colored.
+// Colors are emitted only when stderr is a tty. Active only under -DLOCAL;
+// otherwise it expands to 42, so the same file still builds on judges that
+// don't ship this header.
 //
 // stringify() dispatches at compile time (C++20 concepts + if constexpr) and
 // handles: arithmetic, __int128, char, string/string_view, bool, any
@@ -25,6 +26,11 @@ using std::string;
 
 template <class T>
 string stringify(const T& x);
+
+// color() is defined below but used inside stringify's grid branch (row-index
+// labels); forward-declare it and its enum so name lookup succeeds there
+enum col { reset, gray, cyan, red };
+inline const char* color(col c);
 
 // traits driving the if constexpr ladder below
 template <class> inline constexpr bool is_pair_v = false;
@@ -143,13 +149,25 @@ string stringify(const T& x) {
   } else if constexpr (is_adapter_v<T>) {
     return stringify(underlying(x));
   } else if constexpr (Grid<T>) {
-    // char grids (vector<string>) print raw and tight; value grids get each
-    // cell right-aligned to the widest cell with a leading space
+    // each row is printed on its own line, prefixed with its right-aligned
+    // index in subscript form (`[<i>]`, gray) so it reads like grid[i] —
+    // invaluable for adjacency lists where the index is the node id. char grids
+    // (vector<string>) print raw and tight; value grids get each cell
+    // right-aligned to the widest cell with a leading space
     using Cell = std::ranges::range_value_t<std::ranges::range_value_t<T>>;
+    size_t rows = std::ranges::distance(x);
+    int idx_w = int(std::to_string(rows ? rows - 1 : 0).size());
+    auto label = [&](size_t i) {
+      std::ostringstream os;
+      os << color(gray) << '[' << std::setw(idx_w) << std::right << i << ']'
+         << color(reset) << ' ';
+      return os.str();
+    };
     if constexpr (std::is_same_v<Cell, char>) {
       string res;
+      size_t i = 0;
       for (const auto& row : x) {
-        res += '\n';
+        res += '\n' + label(i++);
         for (char e : row) res += e;
       }
       return res;
@@ -164,8 +182,9 @@ string stringify(const T& x) {
         }
       }
       string res;
+      size_t i = 0;
       for (const auto& row : cells) {
-        res += '\n';
+        res += '\n' + label(i++);
         for (const auto& c : row) res += string(w - c.size() + 1, ' ') + c;
       }
       return res;
@@ -198,7 +217,7 @@ string stringify(const T& x) {
 // ANSI colors, but only when stderr is a terminal; piped/redirected output
 // stays plain so files never get escape-code garbage. Each part of a debug
 // line gets its own color so time / line / expression are easy to tell apart.
-enum col { reset, gray, cyan, red };
+// (col and this signature are forward-declared near the top of the namespace.)
 inline const char* color(col c) {
   static const bool tty = isatty(fileno(stderr));
   if (!tty) return "";
@@ -223,16 +242,15 @@ inline long long delta_ms() {
 // continuation lines (grid rows) are indented to so they stack in one column
 inline constexpr int time_w = 8, line_w = 6, gutter = time_w + line_w;
 
-// print the aligned, colored prefix: +<ms> (gray) | L<line> (cyan) | [expr] (red)
-inline void head(int line, const char* expr) {
+// print the aligned, colored prefix: +<ms> (gray) | L<line> (cyan)
+inline void head(int line) {
   std::cout.flush();  // interleave with buffered cout (see macro note below)
   std::ostringstream t;
   t << '+' << delta_ms() << "ms";
   std::ostringstream l;
   l << 'L' << line;
   std::cerr << color(gray) << std::setw(time_w) << std::left << t.str()
-            << color(cyan) << std::setw(line_w) << std::left << l.str()
-            << color(red) << '[' << expr << "]:" << color(reset);
+            << color(cyan) << std::setw(line_w) << std::left << l.str();
 }
 
 // push any embedded newline (grids print one row per line) into the fixed
@@ -244,9 +262,56 @@ inline string indent(string s) {
   return s;
 }
 
+// split #__VA_ARGS__ into the individual argument names, breaking only on
+// top-level commas so args like make_pair(1, 2) or v[{1, 2}] stay intact
+inline std::vector<string> arg_names(const char* expr) {
+  std::vector<string> names;
+  string cur;
+  int depth = 0;
+  char quote = 0;
+  for (const char* s = expr; *s; s++) {
+    char ch = *s;
+    if (quote) {
+      cur += ch;
+      if (ch == quote && s[-1] != '\\') quote = 0;
+    } else if (ch == '"' || ch == '\'') {
+      quote = ch;
+      cur += ch;
+    } else if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+      depth++;
+      cur += ch;
+    } else if (ch == ')' || ch == ']' || ch == '}' || ch == '>') {
+      depth--;
+      cur += ch;
+    } else if (ch == ',' && depth == 0) {
+      names.push_back(cur);
+      cur.clear();
+    } else {
+      cur += ch;
+    }
+  }
+  names.push_back(cur);
+  for (auto& n : names) {  // trim surrounding whitespace
+    size_t a = n.find_first_not_of(" \t"), b = n.find_last_not_of(" \t");
+    n = (a == string::npos) ? "" : n.substr(a, b - a + 1);
+  }
+  return names;
+}
+
+// print each argument as `name = value`, name in red, value in default color,
+// so it's obvious which value belongs to which expression
 template <class... Ts>
-void out(const Ts&... xs) {
-  ((std::cerr << ' ' << indent(stringify(xs))), ...);
+void out(const char* expr, const Ts&... xs) {
+  auto names = arg_names(expr);
+  size_t i = 0;
+  // read i for the separator/name, then bump it as a separate statement so
+  // there's a sequence point between the read and the write (no UB)
+  auto one = [&](const auto& x) {
+    std::cerr << (i ? ", " : " ") << color(red) << names[i] << color(reset)
+              << " = " << indent(stringify(x));
+    i++;
+  };
+  (one(xs), ...);
   std::cerr << color(reset) << std::endl;
 }
 }  // namespace dbg_impl
@@ -256,8 +321,8 @@ void out(const Ts&... xs) {
 // cerr is unbuffered, so without this every debug line prints before any real
 // output instead of interleaving in program order (handled in head())
 #define dbg(...)                                     \
-  (dbg_impl::head(__LINE__, #__VA_ARGS__),           \
-   dbg_impl::out(__VA_ARGS__))
+  (dbg_impl::head(__LINE__),                         \
+   dbg_impl::out(#__VA_ARGS__, __VA_ARGS__))
 #else
 #define dbg(...) 42
 #endif
