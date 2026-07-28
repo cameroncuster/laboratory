@@ -4,13 +4,18 @@
 // unused include in any file that doesn't happen to call dbg() this session
 
 // dbg(...) pretty-prints its arguments to stderr, tagged with the source text.
+// Each line is prefixed with three color-coded, width-aligned columns so it's
+// easy to scan: `+<delta>ms` (gray, time since the previous dbg call), `L<line>`
+// (cyan), and `[expr]` (red). Colors are emitted only when stderr is a tty.
 // Active only under -DLOCAL; otherwise it expands to 42, so the same file still
 // builds on judges that don't ship this header.
 //
 // stringify() dispatches at compile time (C++20 concepts + if constexpr) and
-// handles: arithmetic, char, string/string_view, bool, any range/container
-// (nested, maps, set, span, ...), pair, tuple/array of any arity, optional,
-// variant, expected (C++23), bitset, and anything with an operator<<.
+// handles: arithmetic, __int128, char, string/string_view, bool, any
+// range/container (nested, maps, set, span, ...), stack/queue/priority_queue,
+// pair, tuple/array of any arity, optional, variant, expected (C++23), bitset,
+// and anything with an operator<<. Large ranges are truncated. 2D grids (a
+// range of ranges, including vector<string>) are laid out one row per line.
 
 #include <bits/stdc++.h>
 #include <unistd.h>  // isatty (not part of bits/stdc++.h)
@@ -34,6 +39,11 @@ template <class> inline constexpr bool is_bitset_v = false;
 template <size_t N> inline constexpr bool is_bitset_v<std::bitset<N>> = true;
 template <class> inline constexpr bool is_vector_bool_v = false;
 template <class A> inline constexpr bool is_vector_bool_v<std::vector<bool, A>> = true;
+template <class> inline constexpr bool is_adapter_v = false;
+template <class T, class C> inline constexpr bool is_adapter_v<std::stack<T, C>> = true;
+template <class T, class C> inline constexpr bool is_adapter_v<std::queue<T, C>> = true;
+template <class T, class C, class Cmp>
+inline constexpr bool is_adapter_v<std::priority_queue<T, C, Cmp>> = true;
 #ifdef __cpp_lib_expected
 template <class> inline constexpr bool is_expected_v = false;
 template <class T, class E> inline constexpr bool is_expected_v<std::expected<T, E>> = true;
@@ -41,6 +51,25 @@ template <class T, class E> inline constexpr bool is_expected_v<std::expected<T,
 
 template <class T>
 concept Streamable = requires(std::ostream& os, const T& x) { os << x; };
+
+// a grid is a range whose elements are themselves ranges (e.g.
+// vector<vector<int>>, vector<string>); printed one row per line
+template <class T>
+concept Grid = std::ranges::range<T> &&
+    std::ranges::range<std::ranges::range_value_t<T>>;
+
+// cap on how many elements of a range we print before eliding the rest
+inline constexpr size_t max_elems = 512;
+
+// stack/queue/priority_queue keep their storage in a protected member `c`;
+// reach it through a subclass that re-exposes the member pointer
+template <class Adapter>
+const auto& underlying(const Adapter& a) {
+  struct hack : Adapter {
+    static const auto& get(const Adapter& a) { return a.*&hack::c; }
+  };
+  return hack::get(a);
+}
 
 template <class T>
 string stringify(const T& x) {
@@ -50,6 +79,30 @@ string stringify(const T& x) {
     return "'" + string(1, x) + "'";
   } else if constexpr (std::is_same_v<T, std::monostate>) {
     return "monostate";
+    // __int128 has no std::to_string overload; build the digits by hand.
+    // the pragma silences -Wpedantic's "ISO C++ does not support __int128"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+  } else if constexpr (std::is_same_v<T, __int128> ||
+                       std::is_same_v<T, unsigned __int128>) {
+    if (x == 0) return "0";
+    bool neg = false;
+    unsigned __int128 u;
+    if constexpr (std::is_same_v<T, __int128>) {
+      neg = x < 0;
+      u = neg ? -static_cast<unsigned __int128>(x) : x;
+    } else {
+      u = x;
+    }
+    string res;
+    while (u) {
+      res += char('0' + int(u % 10));
+      u /= 10;
+    }
+    if (neg) res += '-';
+    std::reverse(res.begin(), res.end());
+    return res;
+#pragma GCC diagnostic pop
   } else if constexpr (std::is_arithmetic_v<T>) {
     return std::to_string(x);
   } else if constexpr (std::is_convertible_v<T, std::string_view>) {
@@ -87,10 +140,47 @@ string stringify(const T& x) {
     string res(x.size(), '0');
     for (size_t i = 0; i < x.size(); i++) res[i] = char('0' + x[i]);
     return res;
+  } else if constexpr (is_adapter_v<T>) {
+    return stringify(underlying(x));
+  } else if constexpr (Grid<T>) {
+    // char grids (vector<string>) print raw and tight; value grids get each
+    // cell right-aligned to the widest cell with a leading space
+    using Cell = std::ranges::range_value_t<std::ranges::range_value_t<T>>;
+    if constexpr (std::is_same_v<Cell, char>) {
+      string res;
+      for (const auto& row : x) {
+        res += '\n';
+        for (char e : row) res += e;
+      }
+      return res;
+    } else {
+      std::vector<std::vector<string>> cells;
+      size_t w = 0;
+      for (const auto& row : x) {
+        cells.emplace_back();
+        for (const auto& e : row) {
+          cells.back().push_back(stringify(e));
+          w = std::max(w, cells.back().back().size());
+        }
+      }
+      string res;
+      for (const auto& row : cells) {
+        res += '\n';
+        for (const auto& c : row) res += string(w - c.size() + 1, ' ') + c;
+      }
+      return res;
+    }
   } else if constexpr (std::ranges::range<T>) {
     string res = "{";
     bool sep = false;
+    size_t n = 0;
     for (const auto& e : x) {
+      if (n++ == max_elems) {
+        res += ", ...";
+        if constexpr (std::ranges::sized_range<T>)
+          res += " (+" + std::to_string(std::ranges::size(x) - max_elems) + " more)";
+        break;
+      }
       if (sep) res += ", ";
       sep = true;
       res += stringify(e);
@@ -105,28 +195,68 @@ string stringify(const T& x) {
   }
 }
 
-// color debug lines red when stderr is a terminal (matches nvim's old :!
-// behavior of painting stderr with ErrorMsg); plain when piped/redirected
-// so files never get escape-code garbage
-inline const char* color(bool open) {
+// ANSI colors, but only when stderr is a terminal; piped/redirected output
+// stays plain so files never get escape-code garbage. Each part of a debug
+// line gets its own color so time / line / expression are easy to tell apart.
+enum col { reset, gray, cyan, red };
+inline const char* color(col c) {
   static const bool tty = isatty(fileno(stderr));
-  return tty ? (open ? "\033[31m" : "\033[0m") : "";
+  if (!tty) return "";
+  switch (c) {
+    case gray: return "\033[90m";
+    case cyan: return "\033[36m";
+    case red: return "\033[31m";
+    default: return "\033[0m";
+  }
+}
+
+// delta ms since the previous dbg() call (the first call measures from here)
+inline long long delta_ms() {
+  static auto last = std::chrono::steady_clock::now();
+  auto now = std::chrono::steady_clock::now();
+  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count();
+  last = now;
+  return ms;
+}
+
+// widths of the time and line columns; their sum is the fixed gutter that
+// continuation lines (grid rows) are indented to so they stack in one column
+inline constexpr int time_w = 8, line_w = 6, gutter = time_w + line_w;
+
+// print the aligned, colored prefix: +<ms> (gray) | L<line> (cyan) | [expr] (red)
+inline void head(int line, const char* expr) {
+  std::cout.flush();  // interleave with buffered cout (see macro note below)
+  std::ostringstream t;
+  t << '+' << delta_ms() << "ms";
+  std::ostringstream l;
+  l << 'L' << line;
+  std::cerr << color(gray) << std::setw(time_w) << std::left << t.str()
+            << color(cyan) << std::setw(line_w) << std::left << l.str()
+            << color(red) << '[' << expr << "]:" << color(reset);
+}
+
+// push any embedded newline (grids print one row per line) into the fixed
+// gutter so multi-line values line up in a consistent left column
+inline string indent(string s) {
+  string pad = "\n" + string(gutter, ' ');
+  for (size_t p = s.find('\n'); p != string::npos; p = s.find('\n', p + pad.size()))
+    s.replace(p, 1, pad);
+  return s;
 }
 
 template <class... Ts>
 void out(const Ts&... xs) {
-  ((std::cerr << ' ' << stringify(xs)), ...);
-  std::cerr << color(false) << std::endl;
+  ((std::cerr << ' ' << indent(stringify(xs))), ...);
+  std::cerr << color(reset) << std::endl;
 }
 }  // namespace dbg_impl
 
 #ifdef LOCAL
 // flush cout first: with sync_with_stdio(0) cout is buffered until exit while
 // cerr is unbuffered, so without this every debug line prints before any real
-// output instead of interleaving in program order
-#define dbg(...)                                                          \
-  (std::cout.flush(),                                                     \
-   std::cerr << dbg_impl::color(true) << "[" << #__VA_ARGS__ << "]:",     \
+// output instead of interleaving in program order (handled in head())
+#define dbg(...)                                     \
+  (dbg_impl::head(__LINE__, #__VA_ARGS__),           \
    dbg_impl::out(__VA_ARGS__))
 #else
 #define dbg(...) 42
