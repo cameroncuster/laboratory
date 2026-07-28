@@ -7,9 +7,10 @@
 // it's obvious which value is which. Each line starts with two color-coded,
 // width-aligned columns: `+<delta>ms` (gray, time since the previous dbg call)
 // and `L<line>` (cyan); each argument's name is red, its value default-colored.
-// Colors are emitted only when stderr is a tty. Active only under -DLOCAL;
-// otherwise it expands to 42, so the same file still builds on judges that
-// don't ship this header.
+// With no arguments, dbg() prints just the prefix as a "reached here"
+// checkpoint. Colors are emitted only when stderr is a tty. Active only under
+// -DLOCAL; otherwise it expands to 42, so the same file still builds on judges
+// that don't ship this header.
 //
 // stringify() dispatches at compile time (C++20 concepts + if constexpr) and
 // handles: arithmetic, __int128, char, string/string_view, bool, any
@@ -298,6 +299,10 @@ inline std::vector<string> arg_names(const char* expr) {
   return names;
 }
 
+// no-arg dbg(): just terminate the prefix line so it reads as a "reached here"
+// checkpoint (only the +<ms> and L<line> columns, no values)
+inline void out(const char*) { std::cerr << color(reset) << std::endl; }
+
 // print each argument as `name = value`, name in red, value in default color,
 // so it's obvious which value belongs to which expression
 template <class... Ts>
@@ -314,6 +319,7 @@ void out(const char* expr, const Ts&... xs) {
   (one(xs), ...);
   std::cerr << color(reset) << std::endl;
 }
+
 }  // namespace dbg_impl
 
 #ifdef LOCAL
@@ -322,7 +328,7 @@ void out(const char* expr, const Ts&... xs) {
 // output instead of interleaving in program order (handled in head())
 #define dbg(...)                                     \
   (dbg_impl::head(__LINE__),                         \
-   dbg_impl::out(#__VA_ARGS__, __VA_ARGS__))
+   dbg_impl::out(#__VA_ARGS__ __VA_OPT__(, ) __VA_ARGS__))
 #else
 #define dbg(...) 42
 #endif
